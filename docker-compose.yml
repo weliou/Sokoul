@@ -1,0 +1,144 @@
+version: "3.9"
+
+networks:
+  sokoul-net:
+    driver: bridge
+
+services:
+  # ============================================
+  # ORCHESTRATION - n8n
+  # ============================================
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: sokoul-n8n
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASS}
+      - N8N_HOST=localhost
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - GENERIC_TIMEZONE=${TZ}
+      - WEBHOOK_URL=http://localhost:5679/
+    volumes:
+      - ./config/n8n:/home/node/.n8n
+    ports:
+      - "5679:5678"
+    networks:
+      - sokoul-net
+    restart: unless-stopped
+
+  # ============================================
+  # INDEXEUR - Prowlarr
+  # ============================================
+  prowlarr:
+    image: linuxserver/prowlarr:latest
+    container_name: sokoul-prowlarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+    volumes:
+      - ./config/prowlarr:/config
+    ports:
+      - "9696:9696"
+    networks:
+      - sokoul-net
+    restart: unless-stopped
+
+  # ============================================
+  # TORRENT CLIENT - qBittorrent
+  # ============================================
+qbittorrent:
+  image: linuxserver/qbittorrent:latest
+  container_name: sokoul-qbittorrent
+  environment:
+    - PUID=1000
+    - PGID=1000
+    - TZ=${TZ}
+    - WEBUI_PORT=8080
+    - UMASK=022
+  volumes:
+    - ./config/qbittorrent:/config
+    - ./downloads:/downloads
+  ports:
+    - "8080:8080"
+    - "6881:6881"
+    - "6881:6881/udp"
+  networks:
+    - sokoul-net
+  restart: unless-stopped
+  # 🆕 Ajouter cet healthcheck
+  healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8080/api/v2/app/webapiVersion"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
+
+  # ============================================
+  # MEDIA SERVER - Jellyfin
+  # ============================================
+  jellyfin:
+    image: jellyfin/jellyfin:latest
+    container_name: sokoul-jellyfin
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=${TZ}
+    volumes:
+      - ./config/jellyfin:/config
+      - ./cache/jellyfin:/cache
+      - ./downloads:/media:ro
+    ports:
+      - "8096:8096"
+    networks:
+      - sokoul-net
+    restart: unless-stopped
+
+  # ============================================
+  # CACHE - KeyDB (Redis compatible)
+  # ============================================
+  keydb:
+    image: eqalpha/keydb:latest
+    container_name: sokoul-keydb
+    command: keydb-server --appendonly yes
+    volumes:
+      - ./data/keydb:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - sokoul-net
+    restart: unless-stopped
+
+  # ============================================
+  # MONITORING - Uptime Kuma
+  # ============================================
+  uptime-kuma:
+    image: louislam/uptime-kuma:latest
+    container_name: sokoul-uptime-kuma
+    volumes:
+      - ./data/uptime-kuma:/app/data
+    ports:
+      - "3001:3001"
+    networks:
+      - sokoul-net
+    restart: unless-stopped
+
+  # ============================================
+  # MONITORING - Grafana
+  # ============================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: sokoul-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USER}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASS}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - sokoul-net
+    restart: unless-stopped
